@@ -17,6 +17,13 @@ curl --cacert ca-crt.pem --key client1-key.pem --cert client1-crt.pem https://lo
 
 Enjoy!
 
+### To generate the `verify_certificate_hash` hash
+
+E.g. for client1-crt.pem.
+
+```
+$ openssl x509 -in path/to/client1-crt.pem -outform DER | openssl dgst -sha256 | cut -d" " -f2
+```
 ### license
 
 MIT
