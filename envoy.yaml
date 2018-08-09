@@ -12,6 +12,8 @@ static_resources:
     - filters:
       - name: envoy.http_connection_manager
         config:
+          http2_settings:
+          codec_type: AUTO
           stat_prefix: ingress_http
           route_config:
             name: local_route
@@ -19,25 +21,140 @@ static_resources:
             - name: local_service
               domains: ["*"]
               routes:
-              - match: { prefix: "/" }
-                route: { host_rewrite: www.google.com, cluster: service_google }
-              - match: { prefix: "/hello" }
-                route: { host_rewrite: www.google.com, cluster: service_google }
+              - match:
+                  prefix: "/"
+                  headers:
+                    - name: x-envoy-application-protocol
+                      exact_match: HTTP/1.1
+                route:
+                  host_rewrite: www.google.com
+                  cluster: service_google
+              - match:
+                  prefix: "/"
+                  headers:
+                    - name: x-envoy-application-protocol
+                      exact_match: HTTP/2
+                route:
+                  host_rewrite: www.cloudflare.com
+                  cluster: service_cloudflare
           http_filters:
+          - name: envoy.lua
+            config:
+              inline_code: |
+                function envoy_on_request(request_handle)
+                  request_handle:logInfo(request_handle:requestInfo():protocol())
+                  request_handle:headers():add("x-envoy-application-protocol", request_handle:requestInfo():protocol())
+                end
+
+                function envoy_on_response(response_handle)
+                end
           - name: envoy.router
       tls_context:
         common_tls_context:
+          alpn_protocols: h2,http/1.1
           tls_certificates:
-            - certificate_chain: { filename: "server-crt.pem" }
-              private_key: { filename: "server-key.pem" }
+            - certificate_chain:
+                inline_string: |
+                  -----BEGIN CERTIFICATE-----
+                  MIIFjDCCA3SgAwIBAgIJANpmU/n9m0lkMA0GCSqGSIb3DQEBCwUAMIGBMQswCQYD
+                  VQQGEwJVUzELMAkGA1UECAwCTUExDzANBgNVBAcMBkJvc3RvbjETMBEGA1UECgwK
+                  RXhhbXBsZSBDbzEQMA4GA1UECwwHdGVjaG9wczELMAkGA1UEAwwCY2ExIDAeBgkq
+                  hkiG9w0BCQEWEWNlcnRzQGV4YW1wbGUuY29tMB4XDTE4MDcwOTA3MjgwMFoXDTIx
+                  MDQwMzA3MjgwMFowgYgxCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJNQTEPMA0GA1UE
+                  BwwGQm9zdG9uMRMwEQYDVQQKDApFeGFtcGxlIENvMRAwDgYDVQQLDAd0ZWNob3Bz
+                  MRIwEAYDVQQDDAlsb2NhbGhvc3QxIDAeBgkqhkiG9w0BCQEWEWNlcnRzQGV4YW1w
+                  bGUuY29tMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAvCSN6erS9LeK
+                  F9Dlg+dljjOsNcLT7I4V65GMrX9NZ81MUSTQ4w8pgrVnKMnvH04w/CAiBsg5XxAJ
+                  jmavAOP/p9AHtFjjtEar4GNAwGMuWz550WrPHc2/Mz1CoQmkNVbjrDVEYnKw5fJ3
+                  oYUdndJNyVoORecPi/8vzkttyjxjFGssBFrByE387NSKocJ7C5T8lJ/0eXZYD3EE
+                  WwhjErmiz+UxzDPdGqN78HrM2mH42kEY2HfveZJNUFYbABjwLa9EGHKn2IFAYS8K
+                  uf9JZt0D4G2ZxQzeYCCtIkRqE7IBi/+Ogfzu7bgPB8bMfiIr1Ixk1MFM69yYC+6/
+                  ABTIi7hiJf9JiKEB55AFHG+I+WVAhwX5M3qLKTVyqsaCs13Bf5N6ckZGSdUR5WFp
+                  sqd2lr6CRG/upo5yc3rKDL7agCsziqETuJWoGb5DgrjQRA1ZtouWxhvDxmJH34Ue
+                  lWg2ird7jdN8X2yYBn93ta3pBfHeFUcD2dvRpZwLoOXcodjT4Qpkah7wxmijxe3S
+                  tMqMAL5GZuvW7ZHUbpnn78k2M8CS1Lqy/E4+N1ngsrIBBsQOTQd7ZLwsgjGhrATb
+                  FDpFlTALP47Qml8E7nKx7K1sjhhJj77fIzvjsqZb3NPjIZfmQAGgEu2X2Mff3+Ef
+                  OCzZI2cMqCT87N/mTNdW6oSQcAupnV8CAwEAATANBgkqhkiG9w0BAQsFAAOCAgEA
+                  qntAR+TCOlOE7dyL+PR90uAYQn8kTTvJv+r2NYBSp25hYWCcOxwjklW5ExBfuBt3
+                  vtFISpbwUrMqTLprTcVw6X1Dh+yuXTEdwcWSccMCMqC8tiKxyRl4o/16jJSZ3AVr
+                  pXhwotXahxmrdf0v7vAgb8SUH7AaGVKlaE+Mt1GRJZtKHsrBQnYQN/RDQW8J4Fd3
+                  Hor2599uFnY3XP79Cb5Nw4eFW1xQcjiaCM35DLq0A5dcSAj6SLvyqTIxZjn+0F32
+                  WUgTDjUXP/hyZ3VPNly/34BXSuwrL2iL9FbRTqQH8kuasdxeDl2Tc+7hP1JiGYU2
+                  F2PtinOSkN6BLIBnkpMZ3jlkFk89gcbNwYMmPn2R6ZFhFhGD+/BxXUp7aIqb1vir
+                  Tpu5eHiZVVJ85aUqnGVr8mv8r1mzSfcaCy7VjLFMkRcrpfk6f0/lCdqEZwGeZVdu
+                  rdvndWcDHtfObTe01uPNoI23ZQadSC0jwdugEyIbPFzd0HBiVKtpTPHsAEa6+DHP
+                  Z1DIijHHrnUqkC2OM3dBdsFT4tDA5Qp8BIXc1aY97RnpJ17ZwHP0Esm8awKw3hUa
+                  z2lzgu7bQWCTHsXC+YZY72t8T6Iz68U7mlzXtpwUFcYY0FrwIAE2ZknhYZ6pRPFJ
+                  Dy6M8FH0hqBXeuFNWaOo3wcKn8UYFRPmTHpKjAuopxU=
+                  -----END CERTIFICATE-----
+              private_key:
+                inline_string: |
+                  -----BEGIN RSA PRIVATE KEY-----
+                  MIIJKAIBAAKCAgEAvCSN6erS9LeKF9Dlg+dljjOsNcLT7I4V65GMrX9NZ81MUSTQ
+                  4w8pgrVnKMnvH04w/CAiBsg5XxAJjmavAOP/p9AHtFjjtEar4GNAwGMuWz550WrP
+                  Hc2/Mz1CoQmkNVbjrDVEYnKw5fJ3oYUdndJNyVoORecPi/8vzkttyjxjFGssBFrB
+                  yE387NSKocJ7C5T8lJ/0eXZYD3EEWwhjErmiz+UxzDPdGqN78HrM2mH42kEY2Hfv
+                  eZJNUFYbABjwLa9EGHKn2IFAYS8Kuf9JZt0D4G2ZxQzeYCCtIkRqE7IBi/+Ogfzu
+                  7bgPB8bMfiIr1Ixk1MFM69yYC+6/ABTIi7hiJf9JiKEB55AFHG+I+WVAhwX5M3qL
+                  KTVyqsaCs13Bf5N6ckZGSdUR5WFpsqd2lr6CRG/upo5yc3rKDL7agCsziqETuJWo
+                  Gb5DgrjQRA1ZtouWxhvDxmJH34UelWg2ird7jdN8X2yYBn93ta3pBfHeFUcD2dvR
+                  pZwLoOXcodjT4Qpkah7wxmijxe3StMqMAL5GZuvW7ZHUbpnn78k2M8CS1Lqy/E4+
+                  N1ngsrIBBsQOTQd7ZLwsgjGhrATbFDpFlTALP47Qml8E7nKx7K1sjhhJj77fIzvj
+                  sqZb3NPjIZfmQAGgEu2X2Mff3+EfOCzZI2cMqCT87N/mTNdW6oSQcAupnV8CAwEA
+                  AQKCAgAVwTxPogGGnnpvSo5fdDBAAyWUidSrc7qBJLFZlnDC4fBDKbilqKkqHgOx
+                  qbfmrMnpPWXx1tEbduVD/AecWMDFDL73UZfyzoEtTwy7sjw3/L9lQa51ScckC59a
+                  s5yzNjrZPMeNgqmFzUWb/aJxD1JDSBCCcLdRfs5uUjZ9vgHO6J2MW1ow6SOn1uO4
+                  1J4Ztr6GCQDh0pdYIb9ZL10VWzXCSEQ70ntsix7XrbtmPRHjWseesC+WpR4fffVd
+                  S4TqI2wCT6+szzU8h43799Lq+/9owgOXz2cfQmgCoFqLsHeRUpmN2kteXXwPcCNR
+                  Km5bA2jdWQSl+Tnzl0WqoryVu1pNy5CtnZjkuDPBE9pYa7eEHGcIlLlOOXexePt8
+                  NsHVytmN6ZmaywvfKGIT+3UIvjJYkQq3KcqhpC75dXFzouXaBYKQQuW0xtqvFTHe
+                  /uGZDy9hfVRMLgcCBhoHYhbTOIVLExYFyh1N+Y7r3WnRKbdQMQQLyfQjHd6Fm/GL
+                  h//eXqdynIVUHUgy2tm9Mm5heEqTw/TmQLFLxGTGV8g+tRwwU5z/LtgKIvC+I2Wg
+                  z+WGirUqSFGT3FowhIuvbr1qft6Vf091F3NMaYfCJeTF/VUrud44eoeyRe2re/fW
+                  7RlE1cW9I86iy0OuGqQDLToFH5K5OD2AKdQYkcqHd/x15m28UQKCAQEA7T9nqhoJ
+                  DqAEvD4vaMtzj1BaON4dVF5c8SPFiTw/dBEllqZqtG8I6mLL4ELLyJIpoeD7G+ie
+                  A57l91b8fJ0EF3Y0Kz396bOw71hUZNr2YwlY64LU5y9FPgPdLt8s6R5uXcwqMcSq
+                  tHIIqNfxyQQ+28yJtymfPG4GSDL3q/zr8/gWECJIRAHzYK0JW9GIdfyiw36JW64O
+                  CxvZJvGNxUXgM/b0muRr0zbIRLDWHAeU7+J4GrfPc44qarFwmHVSv3+QMe/Ogvmu
+                  xD31NHo95wb4lORtvprp1TWzXlrhs330a8IthOfE8OkQpaq/0p/uGEWuNrcp1Yyj
+                  EuiQveiUO2FPxQKCAQEAywOJAPSgyFIy8SH4mmyRm7aqgq0mRUeNqJxwfaGtJdob
+                  DhhkehGGLVcnuQwO9MCmJH30Q6frQtpssajoixEOOkaApnrgJwIShHQUHglTjn3d
+                  L4SGHFTM6cv1GFzuE81cQSdtxra1WpC995CNc+YAkVBrcGXpQNGUC+Nh1FniSYH5
+                  QL0KLsGSqv2I+BmrvlIkaxN4FtDCECn6PPhI1SoLKrw0tB7HTdANjjmMjzgGqUZ2
+                  eosw4wgxlOLD6c7d08K8vnnQsYhzEdV479P7IDHdzQNYbavOXrKUbNbdJkaVQzd0
+                  hlshFerwh8xghy5ARE9ceVzJnea5LPum6qtxgWFG0wKCAQA+I2Y2Yj1PDFBRMYRf
+                  UTJCLgyDaoGKEHENY44gZJxF/Ru4OnwmKBLQuPGnGjefn9Cxqmh6pdGFJ0AaKTlW
+                  NhXVQ0tkrAbuB/dmqN7pz4PK6q7UeF7k8jeTh5WN6jwsDqFfhdLjWBxRyLBF8NFO
+                  EgOYtBi51Xf0bujMTjUaYdM3AhpdPW1qCozBHHEgEGBKbtH+nAzD63GYLUIR9iBo
+                  s+WGFr94Ni2bk3SesSZTDxVOQyWr8cqu/GRVr4XLGKeEqpeMzL9tBJJmqceoaAAA
+                  m43OCYpI6vAlvLvvEaSdy3aSJrifX8jwRErs6Sz2sJa+2rlHcW/Ok9g+YpVOeDUi
+                  3Fj1AoIBAFC1GRQ+LGU2+HWQccrCeqiS1/qXZ22HYrOzba0kRzeTG8pgvCEjMlp4
+                  GZyhRJjctbAwOpli+k5bk3aVlc0jfKqCOMb2doJLep0ZoJ3IS2WMeBBZ+Q7uT4Bq
+                  ywdiemt46sIkMKodHL/iZwMyfmmi+HrMo8nNWgugxeBsBwpqqWFbwIGSJags4GgF
+                  3xvy6KoC8eN3m/hGCcBvT8JJWnsT+diFddZdnhI7MghmrJCLT2qgTp2tFERNj5iH
+                  Bie/S8TR2ENJHkRV4Jkoaqm9dkp4SJsmR1NiR+qxx/v093ot+Uz9kN+Q/vg9rF3w
+                  TDexlW8Stcqxrp2NifRuHw+QFNHAoG0CggEBAKSwcByoEOdhqMdeempERzh7jAB6
+                  TJY8AUHPiInc5l+v0FlnglHqOpcxHTeZW/4C7Xsq/HxKQ42zeHqo+2rpNDuPRqm2
+                  KyblsEXuLAaJyBdyOSaBB11/rW5CgjDSWHsN6knm0ZXvKFyxh7bL0+BoZUERUm4z
+                  4eI2RCTMFfeKEUdDzPPkpKJFZflphVtnEKzx44kSgn8ZQ6PGhh5C2TI8nNlSagHJ
+                  nxqP49JwZgpg70TCsPlATzUV+w2wQM155fxzurTKSWu1aVZp5h3VdkjQUJRZ95F4
+                  DZL8eAEOUMTh5jvLLRQdhukWGOOr5hO8HDRnKMEF10TTQn/bCN05X4IOU7A=
+                  -----END RSA PRIVATE KEY-----
           validation_context:
             verify_certificate_hash: "11d42e7158a8bde645000b7feb4d9fae22a19735f4d9b61a574a1ecc98bbc673"
   clusters:
   - name: service_google
     connect_timeout: 0.25s
     type: LOGICAL_DNS
-    # Comment out the following line to test on v6 networks
     dns_lookup_family: V4_ONLY
     lb_policy: ROUND_ROBIN
     hosts: [{ socket_address: { address: google.com, port_value: 443 }}]
     tls_context: { sni: www.google.com }
+
+  - name: service_cloudflare
+    connect_timeout: 0.25s
+    type: LOGICAL_DNS
+    dns_lookup_family: V4_ONLY
+    lb_policy: ROUND_ROBIN
+    hosts: [{ socket_address: { address: cloudflare.com, port_value: 443 }}]
+    tls_context: { sni: www.cloudflare.com }
