@@ -11,8 +11,16 @@ $ envoy -c envoy.yaml
 
 Call envoy using curl
 
+To route to Google, with http/1.1:
+
 ```
-curl --cacert ca-crt.pem --key client1-key.pem --cert client1-crt.pem https://localhost:10000
+curl -I --http1.1 --cacert ca-crt.pem --key client1-key.pem --cert client1-crt.pem https://localhost:10000
+```
+
+To route to Cloudflare, with http/2:
+
+```
+curl -I --http1.1 --cacert ca-crt.pem --key client1-key.pem --cert client1-crt.pem https://localhost:10000
 ```
 
 Enjoy!
